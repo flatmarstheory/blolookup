@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Punjab BLO Directory</title>
+    <script src="https://cdn.tailwindcss.com/"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;900&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f1f5f9; }
+        .glass-header { background: rgba(30, 58, 138, 0.98); backdrop-filter: blur(12px); }
+        .search-shadow { box-shadow: 0 10px 30px -5px rgba(0,0,0,0.15); }
+        .chart-container { position: relative; width: 100%; height: 220px; max-width: 400px; margin: 0 auto; }
+        .custom-card { transition: border-left-color 0.15s, transform 0.15s; border-left: 4px solid transparent; }
+        .custom-card:hover { border-left-color: #f97316; transform: translateY(-2px); }
+
+        /* Sentinel for infinite scroll */
+        #sentinel { height: 1px; }
+
+        /* Skeleton loader */
+        .skeleton { background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+                    background-size: 200% 100%; animation: shimmer 1.4s infinite; border-radius: 1.5rem; }
+        @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+
+        /* AC filter chips */
+        .ac-chip { cursor: pointer; transition: all 0.15s; }
+        .ac-chip.active { background: #1e3a8a; color: white; }
+        .ac-chip:not(.active) { background: #e2e8f0; color: #475569; }
+        .ac-chip:hover:not(.active) { background: #cbd5e1; }
+    </style>
+</head>
+<body class="text-slate-900">
+
+<header class="glass-header text-white sticky top-0 z-50 shadow-2xl">
+    <div class="max-w-7xl mx-auto px-4 py-5">
+        <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div class="flex items-center space-x-4 shrink-0">
+                <div class="bg-orange-500 p-3 rounded-xl font-black text-2xl shadow-lg rotate-3">PB</div>
+                <div>
+                    <h1 class="text-2xl font-extrabold tracking-tight">BLO Universal Search</h1>
+                    <p class="text-xs text-blue-300 font-medium uppercase tracking-[0.2em]">Election Commission of Punjab</p>
+                </div>
+            </div>
+            <div class="relative flex-1 max-w-3xl">
+                <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                    <span class="text-slate-400">🔍</span>
+                </div>
+                <input type="text" id="globalSearch"
+                    class="block w-full pl-12 pr-12 py-4 border-0 rounded-2xl bg-white text-slate-900 placeholder-slate-400 focus:ring-4 focus:ring-orange-500/30 transition-all search-shadow text-lg"
+                    placeholder="Search by Name, AC No, Booth, Mobile..." autocomplete="off">
+                <button id="clearBtn" class="absolute inset-y-0 right-0 pr-4 hidden items-center text-slate-400 hover:text-slate-700 text-xl">✕</button>
+            </div>
+        </div>
+        <div id="statusIndicator" class="text-xs text-blue-300 mt-3 text-center animate-pulse">Loading database…</div>
+    </div>
+</header>
+
+<main class="max-w-7xl mx-auto px-4 py-8">
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+
+        <!-- Sidebar -->
+        <aside class="lg:col-span-3 space-y-5">
+            <div class="bg-white p-6 rounded-3xl shadow-xl border border-slate-200">
+                <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Showing</p>
+                <div class="flex items-end gap-2">
+                    <span class="text-5xl font-black text-blue-900" id="shownCount">0</span>
+                    <span class="text-slate-400 font-medium mb-1">/ <span id="totalCount">0</span></span>
+                </div>
+                <p class="text-xs text-slate-400 mt-1">Scroll for more</p>
+                <div class="pt-5 border-t border-slate-100 mt-4">
+                    <div class="chart-container"><canvas id="filterChart"></canvas></div>
+                </div>
+            </div>
+
+            <!-- AC Filter -->
+            <div class="bg-white p-5 rounded-3xl shadow-xl border border-slate-200">
+                <div class="flex items-center justify-between mb-3">
+                    <p class="text-xs font-bold text-slate-400 uppercase tracking-widest">Filter by AC</p>
+                    <button id="clearAC" class="text-xs text-blue-600 font-bold hidden">Clear</button>
+                </div>
+                <div id="acChips" class="flex flex-wrap gap-2 max-h-48 overflow-y-auto pr-1"></div>
+            </div>
+        </aside>
+
+        <!-- Main content -->
+        <div class="lg:col-span-9">
+            <div class="flex items-center justify-between mb-6">
+                <h2 class="text-2xl font-bold text-slate-800">Directory Results</h2>
+                <select id="sortOrder" class="bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-bold text-blue-900 outline-none">
+                    <option value="ac">Sort by AC / Booth</option>
+                    <option value="name">Sort by Name</option>
+                </select>
+            </div>
+
+            <div id="resultsGrid" class="grid grid-cols-1 md:grid-cols-2 gap-5"></div>
+
+            <!-- Skeleton placeholders while loading more -->
+            <div id="skeletonGrid" class="hidden grid grid-cols-1 md:grid-cols-2 gap-5 mt-5">
+                <div class="skeleton h-40"></div><div class="skeleton h-40"></div>
+                <div class="skeleton h-40"></div><div class="skeleton h-40"></div>
+            </div>
+
+            <div id="emptyState" class="hidden flex-col items-center justify-center py-32 text-slate-400 bg-white rounded-3xl border-2 border-dashed border-slate-200">
+                <span class="text-6xl mb-4">🔦</span>
+                <p class="text-xl font-bold text-slate-600">No results found</p>
+                <p class="text-sm mt-2">Try a different search term</p>
+            </div>
+
+            <div id="sentinel"></div>
+        </div>
+    </div>
+</main>
+
+<script>
+// ─── State ───────────────────────────────────────────────────────────────────
+let bloData       = [];    // raw parsed records
+let filteredData  = [];    // after search + filter
+let renderedCount = 0;
+const PAGE_SIZE   = 30;
+let isRendering   = false;
+let chartInstance = null;
+let activeAC      = null;  // null = all
+let debounceTimer = null;
+
+// ─── Build a pre-processed search blob once (much faster than runtime join) ──
+function buildBlob(item) {
+    return `${item.ac} ${item.boothNo} ${item.booth} ${item.name} ${item.desig} ${item.mobile}`.toLowerCase();
+}
+
+// ─── CSV Load ────────────────────────────────────────────────────────────────
+async function loadCSV() {
+    const statusEl = document.getElementById('statusIndicator');
+    try {
+        const response = await fetch('Polling_Booth_Wise_BLO_LIST.csv');
+        if (!response.ok) throw new Error('CSV not found');
+        const csvText = await response.text();
+
+        Papa.parse(csvText, {
+            header: true,
+            skipEmptyLines: true,
+            complete(results) {
+                bloData = results.data.map(row => {
+                    const ac      = parseInt(row['AC No'])        || 0;
+                    const boothNo = parseInt(row['Booth No'])     || 0;
+                    const booth   = (row['Booth Name']  || '').trim();
+                    const name    = (row['BLO Name']    || '').trim();
+                    const desig   = (row['Designation'] || 'BLO').trim();
+                    const mobile  = String(row['BLO Mobile No'] || 'N/A').trim();
+                    return { ac, boothNo, booth, name, desig, mobile,
+                             _blob: `${ac} ${boothNo} ${booth} ${name} ${desig} ${mobile}`.toLowerCase() };
+                }).filter(i => i.ac > 0);
+
+                statusEl.innerText = `✓ ${bloData.length.toLocaleString()} entries loaded`;
+                statusEl.classList.remove('animate-pulse', 'text-blue-300');
+                statusEl.classList.add('text-green-400');
+
+                buildACChips();
+                performSearch();
+            }
+        });
+    } catch (err) {
+        statusEl.innerText = "⚠ Error: 'Polling_Booth_Wise_BLO_LIST.csv' not found in the same folder.";
+        statusEl.classList.remove('animate-pulse');
+        statusEl.classList.add('text-red-400');
+    }
+}
+
+// ─── AC Filter Chips ─────────────────────────────────────────────────────────
+function buildACChips() {
+    const acNums = [...new Set(bloData.map(i => i.ac))].sort((a,b) => a-b);
+    const wrap = document.getElementById('acChips');
+    wrap.innerHTML = '';
+    acNums.forEach(ac => {
+        const btn = document.createElement('button');
+        btn.className = 'ac-chip px-3 py-1 rounded-lg text-xs font-bold';
+        btn.textContent = `AC ${ac}`;
+        btn.dataset.ac = ac;
+        btn.addEventListener('click', () => {
+            if (activeAC === ac) {
+                activeAC = null;
+                btn.classList.remove('active');
+            } else {
+                activeAC = ac;
+                wrap.querySelectorAll('.ac-chip').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+            }
+            document.getElementById('clearAC').classList.toggle('hidden', activeAC === null);
+            performSearch();
+        });
+        wrap.appendChild(btn);
+    });
+}
+
+// ─── Search (debounced) ──────────────────────────────────────────────────────
+function scheduleSearch() {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(performSearch, 250);
+}
+
+function performSearch() {
+    const raw   = document.getElementById('globalSearch').value.toLowerCase().trim();
+    const words = raw ? raw.split(/\s+/) : [];
+
+    filteredData = bloData.filter(item => {
+        if (activeAC !== null && item.ac !== activeAC) return false;
+        if (!words.length) return true;
+        const blob = item._blob;
+        return words.every(w => blob.includes(w));
+    });
+
+    // Sort
+    const sort = document.getElementById('sortOrder').value;
+    if (sort === 'name') filteredData.sort((a,b) => a.name.localeCompare(b.name));
+    else                 filteredData.sort((a,b) => a.ac - b.ac || a.boothNo - b.boothNo);
+
+    // Reset render window
+    renderedCount = 0;
+    document.getElementById('resultsGrid').innerHTML = '';
+    document.getElementById('totalCount').innerText = filteredData.length.toLocaleString();
+    updateStats();
+    renderNextPage();
+}
+
+// ─── Virtual rendering (page by page) ────────────────────────────────────────
+function renderNextPage() {
+    if (isRendering) return;
+    const slice = filteredData.slice(renderedCount, renderedCount + PAGE_SIZE);
+    if (!slice.length && renderedCount === 0) {
+        document.getElementById('emptyState').classList.remove('hidden');
+        document.getElementById('emptyState').classList.add('flex');
+        document.getElementById('shownCount').innerText = '0';
+        return;
+    }
+    document.getElementById('emptyState').classList.add('hidden');
+    document.getElementById('emptyState').classList.remove('flex');
+
+    isRendering = true;
+    // Use a DocumentFragment to batch DOM insertions
+    const frag = document.createDocumentFragment();
+    slice.forEach(item => {
+        const card = document.createElement('div');
+        card.className = "bg-white p-6 rounded-3xl shadow-sm border border-slate-200 custom-card flex flex-col justify-between";
+        card.innerHTML = `
+            <div>
+                <div class="flex justify-between items-start mb-4">
+                    <span class="bg-blue-50 text-blue-800 px-3 py-1 rounded-lg text-[10px] font-black uppercase">AC ${item.ac}</span>
+                    <span class="text-slate-300 font-bold text-sm">#${item.ac}-${item.boothNo}</span>
+                </div>
+                <h4 class="font-black text-slate-900 text-lg mb-0.5 leading-snug">${escHtml(item.name)}</h4>
+                <p class="text-blue-600 text-sm font-bold mb-3">${escHtml(item.desig)}</p>
+                <p class="text-sm font-medium text-slate-700 truncate">🏢 ${escHtml(item.booth)}</p>
+            </div>
+            <div class="pt-4 border-t border-slate-100 flex items-center justify-between mt-4">
+                <a href="tel:${item.mobile}" class="text-sm font-black text-slate-900 hover:text-blue-700 transition-colors">📞 ${escHtml(item.mobile)}</a>
+            </div>`;
+        frag.appendChild(card);
+    });
+
+    document.getElementById('resultsGrid').appendChild(frag);
+    renderedCount += slice.length;
+    document.getElementById('shownCount').innerText = renderedCount.toLocaleString();
+    isRendering = false;
+}
+
+function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ─── Infinite scroll via IntersectionObserver ─────────────────────────────────
+const observer = new IntersectionObserver(entries => {
+    if (entries[0].isIntersecting && renderedCount < filteredData.length) {
+        renderNextPage();
+    }
+}, { rootMargin: '300px' });
+observer.observe(document.getElementById('sentinel'));
+
+// ─── Stats / Chart ────────────────────────────────────────────────────────────
+function updateStats() {
+    const counts = { 'Education': 0, 'Health/AWW': 0, 'Technical/Other': 0 };
+    filteredData.forEach(item => {
+        const d = item.desig.toLowerCase();
+        if (d.includes('teacher') || d.includes('master') || d.includes('ett'))
+            counts['Education']++;
+        else if (d.includes('worker') || d.includes('anganwadi') || d.includes('asha') || d.includes('aww') || d.includes('mphw'))
+            counts['Health/AWW']++;
+        else
+            counts['Technical/Other']++;
+    });
+    const ctx = document.getElementById('filterChart').getContext('2d');
+    if (chartInstance) chartInstance.destroy();
+    chartInstance = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: Object.keys(counts),
+            datasets: [{ data: Object.values(counts), backgroundColor: ['#1e3a8a','#f97316','#94a3b8'], borderWidth: 0 }]
+        },
+        options: {
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'bottom', labels: { font: { size: 11, weight: 'bold' }, boxWidth: 12, padding: 8 } }
+            },
+            cutout: '65%'
+        }
+    });
+}
+
+// ─── Event listeners ─────────────────────────────────────────────────────────
+document.getElementById('globalSearch').addEventListener('input', function() {
+    document.getElementById('clearBtn').classList.toggle('hidden', !this.value);
+    document.getElementById('clearBtn').classList.toggle('flex', !!this.value);
+    scheduleSearch();
+});
+
+document.getElementById('clearBtn').addEventListener('click', function() {
+    document.getElementById('globalSearch').value = '';
+    this.classList.add('hidden'); this.classList.remove('flex');
+    performSearch();
+});
+
+document.getElementById('sortOrder').addEventListener('change', performSearch);
+
+document.getElementById('clearAC').addEventListener('click', () => {
+    activeAC = null;
+    document.querySelectorAll('.ac-chip').forEach(b => b.classList.remove('active'));
+    document.getElementById('clearAC').classList.add('hidden');
+    performSearch();
+});
+
+// ─── Boot ─────────────────────────────────────────────────────────────────────
+loadCSV();
+</script>
+</body>
+</html>
